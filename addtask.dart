@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
-import 'task.dart';
 import 'package:intl/intl.dart';
+import 'todomodel.dart';
 
 class AddTaskPage extends StatefulWidget {
-  final Task? task;
+  final Todo? task;
   const AddTaskPage({super.key, this.task});
 
   @override
@@ -13,7 +12,6 @@ class AddTaskPage extends StatefulWidget {
 
 class _AddTaskPageState extends State<AddTaskPage> {
   final TextEditingController _controller = TextEditingController();
-  final Uuid _uuid = const Uuid();
   final _formKey = GlobalKey<FormState>();
   bool _submitted = false;
   late DateTime _selectedDate;
@@ -22,8 +20,8 @@ class _AddTaskPageState extends State<AddTaskPage> {
   void initState() {
     super.initState();
     if (widget.task != null) {
-      _controller.text = widget.task!.title;
-      _selectedDate = widget.task!.createdAt;
+       _controller.text = widget.task!.todo;
+      _selectedDate = widget.task!.createdAt ?? DateTime.now();
     } else {
       _selectedDate = DateTime.now();
     }
@@ -33,7 +31,6 @@ class _AddTaskPageState extends State<AddTaskPage> {
     if (value == null || value.trim().isEmpty) return "Task cannot be empty";
     String trimmed = value.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (trimmed.length < 3) return "Task must have at least 3 letters";
-    if (trimmed.split(' ').length > 3) return "Only 3 words are allowed";
     return null;
   }
 
@@ -42,13 +39,16 @@ class _AddTaskPageState extends State<AddTaskPage> {
       _submitted = true;
     });
     if (_formKey.currentState!.validate()) {
-      final task = Task(
-        id: widget.task?.id ?? _uuid.v4(),
-        title: _controller.text.trim().replaceAll(RegExp(r'\s+'), ' '),
-        isCompleted: widget.task?.isCompleted ?? false,
-        createdAt: _selectedDate,
-      );
-      Navigator.pop(context, task);
+      if (widget.task == null) {
+        Navigator.pop(context,
+            _controller.text.trim().replaceAll(RegExp(r'\s+'), ' '));
+      } else {
+        final updatedTask = widget.task!.copyWith(
+          todo: _controller.text.trim().replaceAll(RegExp(r'\s+'), ' '),
+          createdAt: _selectedDate,
+        );
+        Navigator.pop(context, updatedTask);
+      }
     }
   }
 
@@ -92,7 +92,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Form(
           key: _formKey,
@@ -150,10 +150,8 @@ class _AddTaskPageState extends State<AddTaskPage> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: IconButton(
-                      icon: Icon(
-                        widget.task == null ? Icons.add : Icons.check,
-                        color: Colors.white,
-                      ),
+                      icon: Icon(widget.task == null ? Icons.add : Icons.check,
+                          color: Colors.white),
                       onPressed: submitTask,
                     ),
                   ),
@@ -185,6 +183,7 @@ class _AddTaskPageState extends State<AddTaskPage> {
                   ),
                 ],
               ),
+              const SizedBox(height: 32),
             ],
           ),
         ),

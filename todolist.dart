@@ -1,6 +1,7 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'task.dart';
+import 'todomodel.dart';
 import 'addtask.dart';
 
 class Todolist extends StatefulWidget {
@@ -11,45 +12,105 @@ class Todolist extends StatefulWidget {
 }
 
 class _TodoListState extends State<Todolist> {
-  final List<Task> tasks = [];
+  final List<Todo> tasks = [];
+  final dio = Dio(BaseOptions(baseUrl: "https://dummyjson.com"));
+
+  Future<void> fetch() async {
+    final response = await dio.get("/todos");
+    final model = Todomodel.fromJson(response.data);
+    setState(() {
+      tasks.clear();
+      tasks.addAll(model.todos.map((t) => t.copyWith(
+            createdAt: t.createdAt ?? DateTime.now(),
+            isFromApi: true,
+          )));
+    });
+  }
+
+  Future<void> addTodo(String title) async {
+    final response = await dio.post("/todos/add", data: {
+      "todo": title,
+      "completed": false,
+      "userId": 5,
+    });
+    final newTask = Todo.fromJson(response.data).copyWith(
+      isFromApi: false,
+      id: DateTime.now().millisecondsSinceEpoch,
+      createdAt: DateTime.now(),
+    );
+    setState(() {
+      tasks.add(newTask);
+    });
+  }
+
+  Future<void> updateTodo(Todo task, bool completed, [String? updatedTitle]) async {
+    if (task.isFromApi) {
+      final response = await dio.put("/todos/${task.id}", data: {
+        "completed": completed,
+        "todo": updatedTitle ?? task.todo,
+      });
+      final updatedTask = Todo.fromJson(response.data).copyWith(
+        isFromApi: task.isFromApi,
+        createdAt: task.createdAt,
+      );
+      setState(() {
+        int index = tasks.indexWhere((t) => t.id == updatedTask.id);
+        if (index != -1) {
+          tasks[index] = updatedTask;
+        }
+      });
+    } else {
+      setState(() {
+        int index = tasks.indexWhere((t) => t.id == task.id);
+        if (index != -1) {
+          tasks[index] = task.copyWith(
+              completed: completed,
+              todo: updatedTitle ?? task.todo,
+              createdAt: task.createdAt);
+        }
+      });
+    }
+  }
+
+  Future<void> deleteTodo(Todo task) async {
+    if (task.isFromApi) {
+      await dio.delete("/todos/${task.id}");
+    }
+    setState(() {
+      tasks.removeWhere((t) => t.id == task.id);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    int remainingTodos = tasks.where((task) => !task.isCompleted).length;
+    int remainingTodos = tasks.where((task) => !task.completed).length;
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Container(
+      body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 24),
-            const Text(
-              "Your To Do",
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 16),
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+                const Text(
+                  "Your To Do",
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
                 IconButton(
                   icon: const Icon(Icons.add, color: Colors.black),
                   onPressed: () async {
-                    final Task? newTask = await Navigator.push<Task>(
+                    final String? newTitle = await Navigator.push<String>(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => const AddTaskPage(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const AddTaskPage()),
                     );
-                    if (newTask != null) {
-                      setState(() {
-                        tasks.add(newTask);
-                      });
+                    if (newTitle != null && newTitle.isNotEmpty) {
+                      addTodo(newTitle);
                     }
                   },
                 ),
@@ -57,15 +118,14 @@ class _TodoListState extends State<Todolist> {
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  children: List.generate(tasks.length, (index) {
-                    return taskBox(tasks[index]);
-                  }),
-                ),
-              ),
+              child: tasks.isEmpty
+                  ? const Center(child: Text("No tasks yet"))
+                  : ListView.builder(
+                      itemCount: tasks.length,
+                      itemBuilder: (context, index) => taskBox(tasks[index]),
+                    ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             Text(
               "Your remaining todos: $remainingTodos",
               style: const TextStyle(
@@ -83,29 +143,36 @@ class _TodoListState extends State<Todolist> {
                 fontStyle: FontStyle.italic,
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: fetch,
+              child: const Text(
+                "Click me!",
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget taskBox(Task task) {
+  Widget taskBox(Todo task) {
     return InkWell(
       onTap: () async {
-        final Task? updatedTask = await Navigator.push<Task>(
+        final result = await Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) => AddTaskPage(task: task),
-          ),
+          MaterialPageRoute(builder: (_) => AddTaskPage(task: task)),
         );
-        if (updatedTask != null) {
-          setState(() {
-            int index = tasks.indexWhere((t) => t.id == task.id);
-            if (index != -1) {
-              tasks[index] = updatedTask;
-            }
-          });
+        if (result != null) {
+          if (result is String) {
+            updateTodo(task, task.completed, result);
+          } else if (result is Todo) {
+            updateTodo(task, task.completed, result.todo);
+          }
         }
       },
       child: Container(
@@ -119,17 +186,11 @@ class _TodoListState extends State<Todolist> {
         child: Row(
           children: [
             Checkbox(
-              value: task.isCompleted,
+              value: task.completed,
               activeColor: Colors.black,
               checkColor: Colors.white,
-              onChanged: (value) {
-                setState(() {
-                  int index = tasks.indexWhere((t) => t.id == task.id);
-                  if (index != -1) {
-                    tasks[index] = task.copyWith(isCompleted: value ?? false);
-                  }
-                });
-              },
+              onChanged: (value) =>
+                  updateTodo(task, value ?? task.completed),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -137,33 +198,36 @@ class _TodoListState extends State<Todolist> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    task.title,
+                    task.todo,
                     style: TextStyle(
                       fontSize: 16,
-                      decoration: task.isCompleted
+                      decoration: task.completed
                           ? TextDecoration.lineThrough
                           : TextDecoration.none,
-                      color: task.isCompleted ? Colors.grey : Colors.black,
+                      color: task.completed ? Colors.grey : Colors.black,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    DateFormat('MMM dd, yyyy').format(task.createdAt),
+                    DateFormat('MMM dd, yyyy')
+                        .format(task.createdAt ?? DateTime.now()),
                     style: const TextStyle(
                       fontSize: 12,
                       color: Colors.grey,
                     ),
                   ),
+                  Text("User ID: ${task.userId}",
+                      style:
+                          const TextStyle(fontSize: 12, color: Colors.grey)),
+                  Text("Task ID: ${task.id}",
+                      style:
+                          const TextStyle(fontSize: 12, color: Colors.grey)),
                 ],
               ),
             ),
             IconButton(
               icon: const Icon(Icons.close, color: Colors.black),
-              onPressed: () {
-                setState(() {
-                  tasks.removeWhere((t) => t.id == task.id);
-                });
-              },
+              onPressed: () => deleteTodo(task),
             ),
           ],
         ),
